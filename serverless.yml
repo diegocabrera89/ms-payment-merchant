@@ -1,0 +1,96 @@
+service: ms-payment-merchant
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: provided.al2023
+  architecture: arm64
+  stage: dev
+  timeout: 29
+  logRetentionInDays: 7
+  environment:
+    REGION: us-east-1
+    MERCHANT_DYNAMODB: ${self:resources.Resources.merchant.Properties.TableName}
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+      Resource: "*" # TODO: Replace with index ARN
+#      Resource:
+#        - "arn:aws:dynamodb:${self:provider.environment.REGION}:*:table/${self:provider.environment.MERCHANT_DYNAMODB}"
+
+custom:
+  version: v1
+
+package:
+  individually: true
+
+functions:
+  createMerchant:
+    handler: bootstrap
+    architecture: arm64
+    events:
+      - http:
+          path: ${self:custom.version}/merchants/kinds/createMerchant
+          method: post
+    package:
+      artifact: bin/cmd/createMerchantHandler/createMerchantHandler.zip
+
+  validatePublicMerchantId:
+    handler: bootstrap
+    architecture: arm64
+    events:
+      - http:
+          path: ${self:custom.version}/merchants/kinds/publicMerchant/{publicID}
+          method: get
+    package:
+      artifact: bin/cmd/validatePublicMerchantIdHandler/validatePublicMerchantIdHandler.zip
+
+  validatePrivateMerchantId:
+    handler: bootstrap
+    architecture: arm64
+    events:
+      - http:
+          path: ${self:custom.version}/merchants/kinds/privateMerchant/{privateID}
+          method: get
+    package:
+      artifact: bin/cmd/validatePrivateMerchantIdHandler/validatePrivateMerchantIdHandler.zip
+
+resources:
+  Resources:
+    merchant:
+      Type: "AWS::DynamoDB::Table"
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-merchant
+        AttributeDefinitions:
+          - AttributeName: merchantID #key or primary key
+            AttributeType: S #Data type
+          - AttributeName: publicID
+            AttributeType: S
+          - AttributeName: privateID
+            AttributeType: S
+        KeySchema:
+          - AttributeName: merchantID
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: publicIDIndex
+            KeySchema:
+              - AttributeName: publicID
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: privateIDIndex
+            KeySchema:
+              - AttributeName: privateID
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+        BillingMode: PAY_PER_REQUEST
